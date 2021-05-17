@@ -15,6 +15,9 @@ datadir <- "data"
 # Read RAM Legacy Database v4.491
 load("/Users/cfree/Dropbox/Chris/UCSB/data/ramldb/RAM v4.491 Files (1-14-20)/RAM v4.491/DB Files With Assessment Data/R Data/DBdata[asmt][v4.491].Rdata")
 
+# Read SP fits
+sp_fits <- read.csv("/Users/cfree/Dropbox/Chris/UCSB/projects/trawl_impacts/approach2/data/RAM_sp_model_fits.csv", as.is=T)
+
 
 # Build stock key
 ################################################################################
@@ -66,10 +69,29 @@ stocks <- stock %>%
   # Rearrange columns
   select(stockid, stocklong, assessid, assessorid, assessmethod, country, region, area, species, comm_name)
 
+# Check names
+freeR::check_names(stocks$species)
+
 # Inspects
 freeR::complete(stocks)
 anyDuplicated(stocks$stockid)
 anyDuplicated(stocks$assessid)
+
+# Get resilience
+spp_info <- freeR::fishbase(dataset="stocks", species=sort(unique(stocks$species)))
+res_info <- spp_info %>%
+  janitor::clean_names("snake") %>% 
+  select(species, resilience) %>% 
+  unique() %>% 
+  arrange(species) %>% 
+  filter(!is.na(resilience)) %>% 
+  group_by(species) %>% 
+  slice(1) %>% 
+  ungroup()
+
+# Inspect resilience values
+table(res_info$resilience)
+
 
 # Build catch data
 ################################################################################
@@ -134,7 +156,7 @@ b_df <- timeseries_values_views %>%
   # Arrange
   select(stockid, year, tb, tb_units, ssb, ssb_units)
 
-# Build B/B0 dataframe
+# Build final B/B0 dataframe
 bprop_df <- b_df %>%
   # Add B0 values
   left_join(b0_df) %>% 
@@ -155,8 +177,7 @@ bprop_df <- b_df %>%
 freeR::complete(bprop_df)
 
 
-
-# Merge data
+# Final depletion
 ################################################################################
 
 # Merge data
@@ -173,45 +194,120 @@ data <- catch_df %>%
   # Arrange
   arrange(stockid)
   
-
 # Export data
-################################################################################
-
-
-
-# Plot data
-################################################################################
-
-# CMSY-2017
-
-
-if(cr>=0.8){s_prior <- c(0.4,0.8)}
-if(cr<0.8&cr>=0.5){s_prior <- c(0.2,0.6)}
-if(cr<0.5&cr>=0.35){s_prior <- c(0.01,0.4)}
-if(cr<0.35&cr>=0.15){s_prior <- c(0.01,0.3)}
-if(cr<0.15&cr>=0.05){s_prior <- c(0.01,0.2)}
-if(cr<0.05){s_prior <- c(0.01,0.1)}
-return(s_prior)
-
-cmsy_priors <- matrix(data=c(0.00, 0.00,
-                             0.05, 0.00,
-                             0.),
-                      ncol=2, byrow=T)
+saveRDS(data, file.path(datadir, "depletion_final.Rds"))
 
 # Plot data
 g <- ggplot(data, aes(x=c_prop, y=b_prop)) +
-  # Plot shading
-  geom_polygon()
   # Plot points
   geom_point() +
   # Plot reference line
   geom_hline(yintercept = 1, linetype="dotted") +
+  # Legend
+  scale_fill_discrete(name="Method") +
   # Labels
   labs(x="Catch ratio\n(recent / maximum catch)",
        y="Biomass ratio\n(recent / unexploited biomass)",
-       title="Final depletion") +
+       title="Final depletion",
+       subtitle="Default priors vs. observations") +
   # Theme
   theme_bw()
 g
+
+# Initial depletion
+################################################################################
+
+# Build 
+data1 <- catch_df %>% 
+  # Merge
+  full_join(bprop_df) %>% 
+  # Reduce to years with data
+  filter(!is.na(c_val) & !is.na(b_prop)) %>% 
+  # Most recent year with data
+  group_by(stockid) %>% 
+  arrange(year) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  # Arrange
+  arrange(stockid)
+
+# Export data
+saveRDS(data1, file.path(datadir, "depletion_initial.Rds"))
+
+# Plot data
+g <- ggplot(data1, mapping=aes(x=year, y=b_prop)) +
+  geom_point() +
+  # Plot reference line
+  geom_hline(yintercept = 1, linetype="dotted") +
+  # Labels
+  labs(x="", y="Biomass ratio\n(recent / unexploited biomass)") +
+  # Theme
+  theme_bw()
+g
+
+# Intrinsic growth rate
+################################################################################
+
+# Build resilience data
+data4 <- sp_fits %>%
+  # Add species
+  left_join(stocks %>% select(stockid, species)) %>% 
+  # Add resilience
+  left_join(res_info %>% select(species, resilience)) %>% 
+  # Simplify
+  select(stockid, r, resilience) %>% 
+  # Order resilience
+  mutate(resilience=factor(resilience, levels=c("Very low", "Low", "Medium", "High"))) %>% 
+  # Remove NA
+  filter(!is.na(resilience))
+
+# Export data
+saveRDS(data4, file.path(datadir, "growth_rate.Rds"))
+
+# Plot growth rate
+g <- ggplot(data4, aes(x=resilience, y=r)) +
+  geom_boxplot() +
+  # Labels
+  labs(x="Resilience", y="Intrinsic growth rate, r") +
+  # Theme
+  theme_bw()
+g
+
+# Carrying capacity
+################################################################################
+
+data3 <- catch_df %>% 
+  select(stockid, c_type, c_units, c_max) %>% 
+  unique() %>% 
+  # TC over TL
+  group_by(stockid) %>% 
+  arrange(stockid, c_type) %>% 
+  slice(1) %>% 
+  # Add B0
+  left_join(b0_df) %>% 
+  # Which to use?
+  mutate(b0=ifelse(!is.na(tb0), tb0, ssb0),
+         b0_units=ifelse(!is.na(tb0), tb0_units, ssb0_units),
+         b0_type=ifelse(!is.na(tb0), "TB", "SSB")) %>% 
+  # Reduce
+  filter(!is.na(b0) & !is.na(c_max)) %>% 
+  # Simplify
+  select(stockid, c_type, c_units, c_max, b0_type, b0_units, b0) %>% 
+  # Scalar
+  mutate(scalar=b0/c_max) %>% 
+  # Eliminate non-matching units
+  filter(b0_units==c_units) %>% 
+  # Add species
+  left_join(stocks %>% select(stockid, species)) %>% 
+  # Add resilience
+  left_join(res_info %>% select(species, resilience)) %>% 
+  # Arrange
+  select(stockid, species, resilience, everything())
+ 
+# Check
+sum(data3$c_units!=data3$b0_units)
+
+# Export data
+saveRDS(data3, file.path(datadir, "carrying_capacity.Rds"))
 
 
