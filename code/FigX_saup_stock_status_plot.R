@@ -69,3 +69,10 @@ g
 # Export
 ggsave(g, filename=file.path(plotdir, "FigX_saup_stock_status_plot.png"), 
        width=6.5, height=2.5, units="in", dpi=600)
+
+
+# PDF
+ggsave(g, filename=file.path(plotdir, "FigX_saup_stock_status_plot.pdf"), 
+       width=180, height=180 / 6.5 * 2.5, units="mm", dpi=600)
+
+

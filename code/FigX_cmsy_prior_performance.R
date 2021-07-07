@@ -76,8 +76,8 @@ k_use <- bind_rows(k, k_all) %>%
 ################################################################################
 
 # Final depletion stats
-sum(sat2$true_yn1) / nrow(sat2) * 100
-sum(sat2$true_yn3) / nrow(sat2) * 100
+sum(sat2$true_yn1) / nrow(sat2) * 100 # Catch-MSY
+sum(sat2$true_yn3) / nrow(sat2) * 100 # CMSY
 
 sum(sat2$c_prop<0.5) / nrow(sat2) *100
 
@@ -232,4 +232,9 @@ g
 # Export figure
 ggsave(g, filename=file.path(plotdir, "FigX_cmsy_prior_performance.png"), 
        width=6.5, height=5.5, units="in", dpi=600)
+
+# PDF
+ggsave(g, filename=file.path(plotdir, "FigX_cmsy_prior_performance.pdf"), 
+       width=180, height=180 / 6.5 * 5.5, units="mm", dpi=600)
+
 
